@@ -211,7 +211,7 @@ class ClientAPI {
         return { success: true, data: response.data, status: response.status, error: null };
       } catch (error) {
         errorStatus = error.status;
-        errorMessage = error?.response?.data?.message ? error?.response?.data : error.message;
+        errorMessage = error?.response?.data?.message ? error?.response?.data?.message : error.message;
         this.log(`Request failed: ${url} | Status: ${error.status} | ${JSON.stringify(errorMessage || {})}...`, "warning");
 
         if (error.status == 401) {
