@@ -17,6 +17,7 @@ const { Keypair } = require("@solana/web3.js");
 const nacl = require("tweetnacl");
 const bs58 = require("bs58");
 const cpus = require("./core/CPU.js");
+const { sovleCaptcha } = require("./captcha.js");
 let intervalIds = [];
 
 function getWalletFromPrivateKey(privateKeyBase58) {
@@ -34,7 +35,8 @@ class ClientAPI {
       "Sec-Fetch-Dest": "empty",
       "Sec-Fetch-Mode": "cors",
       "Sec-Fetch-Site": "none",
-      origin: "https://dashboard.flow3.tech",
+      origin: "https://app.flow3.tech",
+      referer: "https://app.flow3.tech/",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
     };
     this.baseURL = baseURL;
@@ -113,7 +115,7 @@ class ClientAPI {
 
   createUserAgent() {
     try {
-      this.session_name = this.itemData.address;
+      this.session_name = this.itemData.email;
       this.#get_user_agent();
     } catch (error) {
       this.log(`Can't create user agent: ${error.message}`, "error");
@@ -122,7 +124,7 @@ class ClientAPI {
   }
 
   async log(msg, type = "info") {
-    const accountPrefix = `[Flow3][Account ${this.accountIndex + 1}][${this.itemData.address}]`;
+    const accountPrefix = `[Flow3][Account ${this.accountIndex + 1}][${this.itemData.email}]`;
     let ipPrefix = "[Local IP]";
     if (settings.USE_PROXY) {
       ipPrefix = this.proxyIP ? `[${this.proxyIP}]` : "[Unknown IP]";
@@ -211,7 +213,7 @@ class ClientAPI {
         return { success: true, data: response.data, status: response.status, error: null };
       } catch (error) {
         errorStatus = error.status;
-        errorMessage = error?.response?.data?.message ? error?.response?.data?.message : error.message;
+        errorMessage = error?.response?.data?.message ? error?.response?.data : error.message;
         this.log(`Request failed: ${url} | Status: ${error.status} | ${JSON.stringify(errorMessage || {})}...`, "warning");
 
         if (error.status == 401) {
@@ -237,23 +239,38 @@ class ClientAPI {
     return { status: errorStatus, success: false, error: errorMessage, data: null };
   }
 
-  async auth() {
-    const message = "Please sign this message to connect your wallet to Flow 3 and verifying your ownership only.";
-    const messageBuffer = Buffer.from(message);
-    const secretKey = new Uint8Array(this.itemData.secretKey);
-    const signature = nacl.sign.detached(messageBuffer, secretKey);
-    const signatureBase58 = bs58.encode(signature);
+  // async auth() {
+  //   const message = "Please sign this message to connect your wallet to Flow 3 and verifying your ownership only.";
+  //   const messageBuffer = Buffer.from(message);
+  //   const secretKey = new Uint8Array(this.itemData.secretKey);
+  //   const signature = nacl.sign.detached(messageBuffer, secretKey);
+  //   const signatureBase58 = bs58.encode(signature);
+  //   const payload = {
+  //     message: message,
+  //     walletAddress: this.itemData.address,
+  //     signature: signatureBase58,
+  //     referralCode: settings.REF_CODE,
+  //   };
+  //   return this.makeRequest(`${this.baseURL}/user/login`, "post", payload, { isAuth: true });
+  // }
+
+  async login() {
+    const captchaToken = await sovleCaptcha();
+    if (!captchaToken) {
+      this.log(`Can't get captcha token...`, "error");
+      await sleep(1);
+      process.exit(1);
+    }
     const payload = {
-      message: message,
-      walletAddress: this.itemData.address,
-      signature: signatureBase58,
-      referralCode: settings.REF_CODE,
+      email: this.itemData.email,
+      password: this.itemData.password,
+      captchaToken,
     };
-    return this.makeRequest(`${this.baseURL}/v1/user/login`, "post", payload, { isAuth: true });
+    return this.makeRequest(`${this.baseURL}/user/login`, "post", payload, { isAuth: true });
   }
 
   async hb() {
-    return this.makeRequest(`${this.baseURL}/v1/bandwidth`, "post", null, {
+    return this.makeRequest(`${this.baseURL}/bandwidth`, "post", null, {
       extraHeaders: {
         Origin: "chrome-extension://lhmminnoafalclkgcbokfcngkocoffcp",
       },
@@ -262,7 +279,7 @@ class ClientAPI {
 
   async getRefereshToken() {
     return this.makeRequest(
-      `${this.baseURL}/v1/user/refresh`,
+      `${this.baseURL}/user/refresh`,
       "post",
       {
         refreshToken: this.authInfo.refreshToken,
@@ -273,28 +290,24 @@ class ClientAPI {
     );
   }
 
-  async getRef() {
-    return this.makeRequest(`${this.baseURL}/v1/ref/stats`, "get");
+  async getBalance() {
+    return this.makeRequest(`${this.baseURL}/user/get-point-stats`, "get");
   }
 
-  async getBalance() {
-    return this.makeRequest(`${this.baseURL}/v1/point/info`, "get", null, {
-      extraHeaders: {
-        Origin: "chrome-extension://lhmminnoafalclkgcbokfcngkocoffcp",
-      },
-    });
+  async getConnectQuality() {
+    return this.makeRequest(`${this.baseURL}/user/get-connection-quality`, "get");
   }
 
   async getUserData() {
-    return this.makeRequest(`${this.baseURL}/v1/user/profile`, "get");
+    return this.makeRequest(`${this.baseURL}/user/profile`, "get");
   }
 
   async getTasks() {
-    return this.makeRequest(`${this.baseURL}/v1/tasks/`, "get");
+    return this.makeRequest(`${this.baseURL}/task/get-user-task`, "get");
   }
 
   async getDailyTasks() {
-    return this.makeRequest(`${this.baseURL}/v1/tasks/daily`, "get");
+    return this.makeRequest(`${this.baseURL}/task/get-user-task-daily`, "get");
   }
 
   async getTasksCompleted() {
@@ -302,11 +315,15 @@ class ClientAPI {
   }
 
   async compleTask(id) {
-    return this.makeRequest(`${this.baseURL}/v1/tasks/${id}/complete`, "post");
+    return this.makeRequest(`${this.baseURL}/task/do-task`, "post", { taskId: id });
   }
 
-  async checkin() {
-    return this.makeRequest(`${this.baseURL}/v1/tasks/complete-daily`, "post");
+  async claimTask(id) {
+    return this.makeRequest(`${this.baseURL}/task/claim-task`, "post", { taskId: id });
+  }
+
+  async checkin(id) {
+    return this.makeRequest(`${this.baseURL}/task/daily-check-in`, "post", { taskId: id });
   }
 
   async getValidToken(isNew = false) {
@@ -325,18 +342,18 @@ class ClientAPI {
       if (!isExpRe) {
         const result = await this.getRefereshToken();
         if (result.data?.accessToken) {
-          saveJson(this.session_name, JSON.stringify(result.data), "localStorage.json");
+          await saveJson(this.session_name, JSON.stringify(result.data), "localStorage.json");
           return result.data.accessToken;
         }
       }
     }
 
-    this.log("No found token or experied...", "warning");
-    const loginRes = await this.auth();
+    this.log("No found token or experied, logining......", "warning");
+    const loginRes = await this.login();
     if (!loginRes?.success) return null;
     const newToken = loginRes.data;
     if (newToken?.accessToken) {
-      saveJson(this.session_name, JSON.stringify(newToken), "localStorage.json");
+      await saveJson(this.session_name, JSON.stringify(newToken), "localStorage.json");
       return newToken.accessToken;
     }
     this.log("Can't get new token...", "warning");
@@ -346,8 +363,8 @@ class ClientAPI {
   async handleCheckPoint() {
     const balanceData = await this.getBalance();
     if (!balanceData.success) return this.log(`Can't sync new points...`, "warning");
-    const { referralEarningPoint, totalEarningPoint, todayEarningPoint } = balanceData.data;
-    this.log(`${new Date().toLocaleString()} Earning today: ${todayEarningPoint} | Total points: ${totalEarningPoint} | Recheck after 5 minutes`, "custom");
+    const { totalPointEarned, todayPointEarned } = balanceData.data;
+    this.log(`${new Date().toLocaleString()} Earning today: ${totalPointEarned.toFixed(2)} | Total points: ${todayPointEarned.toFixed(2)} | Recheck after 5 minutes`, "custom");
   }
 
   async checkInvaliable(date) {
@@ -364,18 +381,18 @@ class ClientAPI {
     this.log(`Get checkin status...`);
 
     const dailytasksData = await this.getDailyTasks();
-
-    const today = dailytasksData.data.find((i) => i.status == 0);
+    if (!dailytasksData.success) return this.log("Can't get daily tasks...", "warning");
+    const today = dailytasksData.data.find((i) => i.status == "idle");
 
     if (today) {
-      const resCheckin = await this.checkin();
-      if (resCheckin.data?.statusCode) this.log(`${today.title} success | Reward: ${JSON.stringify(today.reward || {})}`, "success");
+      const resCheckin = await this.checkin(today._id);
+      if (resCheckin.data?.result == "success") this.log(`${today.name} success | Reward: ${today.pointAmount || 0}`, "success");
       else {
         this.log(`Can't checkin | ${JSON.stringify(resCheckin)}`, "warning");
       }
     }
     this.authInfo["latestCheckin"] = new Date();
-    saveJson(this.session_name, JSON.stringify(this.authInfo), "localStorage.json");
+    await saveJson(this.session_name, JSON.stringify(this.authInfo), "localStorage.json");
   }
 
   async handleTasks() {
@@ -383,24 +400,33 @@ class ClientAPI {
     let tasks = [];
     const tasksData = await this.getTasks();
 
-    if (!tasksData.success && !dailytasks.success) {
+    if (!tasksData.success) {
       this.log("Can't get tasks...", "warning");
       return;
     }
 
-    const tasksToComplete = tasksData.data.filter((task) => task.status != 1 && !settings.SKIP_TASKS.includes(task.taskId));
+    const tasksToComplete = tasksData.data.filter((task) => task.status != "claimed" && !settings.SKIP_TASKS.includes(task._id));
 
     if (tasksToComplete.length == 0) return this.log(`No tasks avaliable to do!`, "warning");
     for (const task of tasksToComplete) {
-      await sleep(1);
-      const { taskId, title } = task;
-
-      this.log(`Completing task: ${taskId} | ${title}...`);
+      let { _id: taskId, name: title, status } = task;
+      const timeSleep = getRandomNumber(settings.DELAY_BETWEEN_REQUESTS[0], settings.DELAY_BETWEEN_REQUESTS[1]);
+      this.log(`Completing task: ${taskId} | ${title} | Waiting: ${timeSleep}s...`);
       const compleRes = await this.compleTask(taskId);
-
-      if (compleRes.data?.statusCode == 200) this.log(`Task ${taskId} | ${title} complete successfully! | Reward: ${JSON.stringify(task.reward)}`, "success");
-      else {
+      if (compleRes.data?.result == "success") {
+        this.log(`Task ${taskId} | ${title} complete successfully! | Reward: ${task.pointAmount}`, "success");
+        status = "pending";
+      } else {
         this.log(`Can't complete task ${taskId} | ${title} | ${JSON.stringify(compleRes)}...`, "warning");
+      }
+      await sleep(3);
+      if (status == "pending") {
+        const claimRes = await this.claimTask(taskId);
+        if (claimRes.data?.result == "success") {
+          this.log(`Task ${taskId} | ${title} claimed successfully! | Reward: ${task.pointAmount}`, "success");
+        } else {
+          this.log(`Can't claim task ${taskId} | ${title} | ${JSON.stringify(claimRes)}...`, "warning");
+        }
       }
     }
   }
@@ -417,10 +443,24 @@ class ClientAPI {
     } while (retries < 1 && userData.status !== 400);
     const balanceData = await this.getBalance();
     if (userData.success && balanceData.success) {
-      const { referralCode, email, username } = userData.data;
-      const { referralEarningPoint, totalEarningPoint, todayEarningPoint } = balanceData.data;
+      const { referralCode, email, username, walletAddress } = userData.data;
+      const { totalPointEarned, todayPointEarned } = balanceData.data;
 
-      this.log(`Ref code: ${referralCode} | Username: ${username || "Not set"} | Email: ${email || "Not set"} | Earning today: ${todayEarningPoint} | Total points: ${totalEarningPoint}`, "custom");
+      this.log(`Ref code: ${referralCode} | Username: ${username || "Not set"} | Email: ${email || "Not set"} | Earning today: ${todayPointEarned} | Total points: ${totalPointEarned}`, "custom");
+
+      if (!walletAddress) {
+        this.log(`Wallet address not set! | Trying to set...`, "warning");
+        const payload = {
+          walletAddress: this.itemData.address,
+        };
+        const resSetWallet = await this.makeRequest(`${this.baseURL}/user/update-wallet-address`, "post", payload);
+        if (resSetWallet.success) {
+          this.log(`Wallet address set successfully! | ${this.itemData.address}`, "success");
+          userData.data.walletAddress = this.itemData.address;
+        } else {
+          this.log(`Can't set wallet address | ${JSON.stringify(resSetWallet)}`, "warning");
+        }
+      }
     } else {
       return this.log("Can't sync new data...skipping", "warning");
     }
@@ -428,16 +468,16 @@ class ClientAPI {
   }
 
   async handleHB() {
-    const result = await this.hb();
+    const result = await this.getConnectQuality();
     if (result?.success) {
-      this.log(`[${new Date().toLocaleString()}] Ping success!`, "success");
+      this.log(`[${new Date().toLocaleString()}][Connect quality: ${result.data}%] Ping success!`, "success");
     } else {
       this.log(`[${new Date().toLocaleString()}] Ping failed! | ${JSON.stringify(result || {})}`, "warning");
     }
   }
 
   async runAccount() {
-    this.session_name = this.itemData.address;
+    this.session_name = this.itemData.email;
     this.authInfo = JSON.parse(this.localStorage[this.session_name] || "{}");
     this.token = this.authInfo?.token;
     this.#set_headers();
@@ -472,7 +512,7 @@ class ClientAPI {
       }
       if (settings.AUTO_MINING) {
         await this.handleHB();
-        const interValHB = setInterval(() => this.handleHB(), 60 * 1000);
+        const interValHB = setInterval(() => this.handleHB(), settings.PING_INTERVAL * 1000);
         intervalIds.push(interValHB);
       }
     } else {
@@ -494,6 +534,7 @@ async function main() {
   console.log(colors.yellow("Tool được phát triển bởi nhóm tele Airdrop Hunter Siêu Tốc (https://t.me/airdrophuntersieutoc)"));
 
   const data = loadData("privateKeys.txt");
+  const accounts = loadData("accounts.txt");
   const proxies = loadData("proxy.txt");
   let localStorage = JSON.parse(fs.readFileSync("localStorage.json", "utf8"));
 
@@ -513,14 +554,17 @@ async function main() {
   if (!endpoint) return console.log(`Không thể tìm thấy ID API, thử lại sau!`.red);
   console.log(`${message}`.yellow);
 
-  const itemDatas = data
+  const itemDatas = accounts
     .map((val, index) => {
-      const wallet = getWalletFromPrivateKey(val);
+      const [email, password] = val.split("|");
+      const wallet = getWalletFromPrivateKey(data[index]);
       const item = {
-        privateKey: val,
+        privateKey: data[index],
         publicKey: wallet.publicKey,
         secretKey: wallet.secretKey,
         address: wallet.publicKey.toBase58(),
+        email: email,
+        password: password,
         index,
       };
       return item;

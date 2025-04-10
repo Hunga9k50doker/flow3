@@ -7,6 +7,7 @@ const settings = {
   MAX_LEVEL_SPEED: process.env.MAX_LEVEL_SPEED ? parseInt(process.env.MAX_LEVEL_SPEED) : 10,
   MAX_THEADS_NO_PROXY: process.env.MAX_THEADS_NO_PROXY ? parseInt(process.env.MAX_THEADS_NO_PROXY) : 10,
   AMOUNT_REF: process.env.AMOUNT_REF ? parseInt(process.env.AMOUNT_REF) : 100,
+  PING_INTERVAL: process.env.PING_INTERVAL ? parseInt(process.env.PING_INTERVAL) : 100,
 
   SKIP_TASKS: process.env.SKIP_TASKS ? JSON.parse(process.env.SKIP_TASKS.replace(/'/g, '"')) : [],
   TYPE_HERO_UPGRADE: process.env.TYPE_HERO_UPGRADE ? JSON.parse(process.env.TYPE_HERO_UPGRADE.replace(/'/g, '"')) : [],
@@ -38,7 +39,7 @@ const settings = {
   BASE_URL: process.env.BASE_URL ? process.env.BASE_URL : "https://api.sogni.ai",
   BASE_URL_v2: process.env.BASE_URL_v2 ? process.env.BASE_URL_v2 : "https://api.sogni.ai",
 
-  REF_CODE: process.env.REF_CODE ? process.env.REF_CODE : "do3SBd5re",
+  REF_CODE: process.env.REF_CODE ? process.env.REF_CODE : "leduychung",
   RPC_URL: process.env.RPC_URL ? process.env.RPC_URL : "https://evmrpc-testnet.0g.ai",
   CHAIN_ID: process.env.CHAIN_ID ? process.env.CHAIN_ID : 16600,
 
